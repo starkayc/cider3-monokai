@@ -1,0 +1,56 @@
+name: Sync Base Theme
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 1 * * *"
+
+jobs:
+  sync-base:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch and rebuild base.css
+        run: |
+          SOURCE_URL="https://raw.githubusercontent.com/catppuccin/cider/refs/heads/main/themes/ctp-mocha/catppuccin-mocha.scss"
+          TMP_FILE="$(mktemp)"
+
+          curl -fsSL "$SOURCE_URL" -o "$TMP_FILE"
+
+          {
+            echo "body.body--dark,"
+            echo "body.body--light {"
+            # Extract everything from the Globals marker to the end.
+            awk 'found { print } /\/\* Globals \*\// { found=1; print }' "$TMP_FILE"
+          } > monokai/base.css
+
+          echo "}" >> monokai/base.css
+
+      - name: Commit and push if changed
+        run: |
+          if git status --porcelain | grep -q "monokai/base.css"; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            BRANCH="chore/sync-base-$(date +%Y%m%d)"
+            git checkout -b "$BRANCH"
+            git add monokai/base.css
+            git commit -m "chore: sync base.css from catppuccin"
+            git push -u origin "$BRANCH"
+
+            gh pr create \
+              --title "chore: sync base.css from catppuccin" \
+              --body "Automated update of monokai/base.css from the catppuccin source." \
+              --base "${{ github.ref_name }}" \
+              --head "$BRANCH"
+          else
+            echo "No changes to commit."
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
